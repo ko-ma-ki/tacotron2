@@ -1,0 +1,7 @@
+#torchは自分のOSに合ったものをインストールしてください
+#事前に conda undate --allでパッケージを最新版に更新しておいてください
+torchvision
+torchaudio
+librosa
+Unidecode
+librosa
