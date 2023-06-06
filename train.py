@@ -279,7 +279,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     hparams = create_hparams(args.hparams)
 
-    device = get_device(pref="cpu")
+    print(hparams.backends)
+    device = get_device(pref=hparams.backends)
 
     torch.backends.cudnn.enabled = hparams.cudnn_enabled
     torch.backends.cudnn.benchmark = hparams.cudnn_benchmark
