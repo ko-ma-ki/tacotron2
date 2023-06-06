@@ -1,1 +1,8 @@
 __pycache__/
+.vscode/
+outdir/
+logdir/
+filelists/
+text/
+waveglow/
+corpus/

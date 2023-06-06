@@ -5,3 +5,5 @@ torchaudio
 librosa
 Unidecode
 librosa
+#必須じゃない
+#tensorboard
