@@ -1,4 +1,5 @@
 import os
+os.environ['KMP_DUPLICATE_LIB_OK']='TRUE'
 import time
 import argparse
 import math
@@ -16,6 +17,7 @@ from loss_function import Tacotron2Loss
 from logger import Tacotron2Logger
 from hparams import create_hparams
 
+from utils import get_device
 
 def reduce_tensor(tensor, n_gpus):
     rt = tensor.clone()
@@ -71,7 +73,7 @@ def prepare_directories_and_logger(output_directory, log_directory, rank):
 
 
 def load_model(hparams):
-    model = Tacotron2(hparams).cuda()
+    model = Tacotron2(hparams).to(device)
     if hparams.fp16_run:
         model.decoder.attention_layer.score_mask_value = finfo('float16').min
 
@@ -276,6 +278,8 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     hparams = create_hparams(args.hparams)
+
+    device = get_device(pref="cpu")
 
     torch.backends.cudnn.enabled = hparams.cudnn_enabled
     torch.backends.cudnn.benchmark = hparams.cudnn_benchmark
