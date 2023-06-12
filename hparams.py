@@ -12,6 +12,7 @@ class Hparams():
         ################################
         self.epochs=500
         self.iters_per_checkpoint=1000
+        self.epochs_per_checkpoint=100,
         self.seed=1234
         self.dynamic_loss_scaling=True
         self.fp16_run=False

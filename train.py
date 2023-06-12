@@ -6,6 +6,7 @@ import math
 from numpy import finfo
 
 import torch
+import torch.amp
 from distributed import apply_gradient_allreduce
 import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
@@ -129,7 +130,6 @@ def validate(model, criterion, valset, iteration, batch_size, n_gpus,
         val_loader = DataLoader(valset, sampler=val_sampler, num_workers=1,
                                 shuffle=False, batch_size=batch_size,
                                 pin_memory=False, collate_fn=collate_fn)
-
         val_loss = 0.0
         for i, batch in enumerate(val_loader):
             x, y = model.parse_batch(batch)
@@ -139,6 +139,7 @@ def validate(model, criterion, valset, iteration, batch_size, n_gpus,
                 reduced_val_loss = reduce_tensor(loss.data, n_gpus).item()
             else:
                 reduced_val_loss = loss.item()
+            print("loss" + str(i) + ":" + str(reduced_val_loss))
             val_loss += reduced_val_loss
         val_loss = val_loss / (i + 1)
 
@@ -173,9 +174,10 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
                                  weight_decay=hparams.weight_decay)
 
     if hparams.fp16_run:
-        from apex import amp
-        model, optimizer = amp.initialize(
-            model, optimizer, opt_level='O2')
+        pass
+        #import torch.amp
+        #model, optimizer = amp.initialize(
+        #    model, optimizer, opt_level='O2')
 
     if hparams.distributed_run:
         model = apply_gradient_allreduce(model)
@@ -204,6 +206,9 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
 
     model.train()
     is_overflow = False
+    scaler = None
+    if hparams.fp16_run and hparams.backends == "cuda":
+        scaler = torch.cuda.amp.GradScaler()
     # ================ MAIN TRAINNIG LOOP! ===================
     for epoch in range(epoch_offset, hparams.epochs):
         print("Epoch: {}".format(epoch))
@@ -212,30 +217,52 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
             for param_group in optimizer.param_groups:
                 param_group['lr'] = learning_rate
 
-            model.zero_grad()
-            x, y = model.parse_batch(batch)
-            y_pred = model(x)
+            if hparams.fp16_run and hparams.backends == "cuda":
+                with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+                    model.zero_grad()
+                    x, y = model.parse_batch(batch)
+                    y_pred = model(x)
 
-            loss = criterion(y_pred, y)
+                    loss = criterion(y_pred, y)
+            elif hparams.fp16_run and hparams.backends == "cpu":
+                with torch.amp.autocast(device_type="cpu", dtype=torch.bfloat16):
+                    model.zero_grad()
+                    x, y = model.parse_batch(batch)
+                    y_pred = model(x)
+                    loss = criterion(y_pred, y)
+            else:
+                model.zero_grad()
+                x, y = model.parse_batch(batch)
+                y_pred = model(x)
+
+                loss = criterion(y_pred, y)
+                
             if hparams.distributed_run:
                 reduced_loss = reduce_tensor(loss.data, n_gpus).item()
             else:
                 reduced_loss = loss.item()
-            if hparams.fp16_run:
-                with amp.scale_loss(loss, optimizer) as scaled_loss:
-                    scaled_loss.backward()
+            if hparams.fp16_run and hparams.backends == "cuda":
+                #with amp.scale_loss(loss, optimizer) as scaled_loss:
+                #    scaled_loss.backward()
+                scaler.scale(loss).backward()
             else:
                 loss.backward()
 
-            if hparams.fp16_run:
-                grad_norm = torch.nn.utils.clip_grad_norm_(
-                    amp.master_params(optimizer), hparams.grad_clip_thresh)
+            if hparams.fp16_run and hparams.backends == "cuda":
+                #grad_norm = torch.nn.utils.clip_grad_norm_(
+                #    amp.master_params(optimizer), hparams.grad_clip_thresh)
+                scaler.unscale_(optimizer)
+                grad_norm = torch.nn.utils.torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), hparams.grad_clip_thresh)
                 is_overflow = math.isnan(grad_norm)
             else:
                 grad_norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), hparams.grad_clip_thresh)
-
-            optimizer.step()
+            if hparams.fp16_run and hparams.backends == "cuda":
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                optimizer.step()
 
             if not is_overflow and rank == 0:
                 duration = time.perf_counter() - start
@@ -255,6 +282,12 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
                                     checkpoint_path)
 
             iteration += 1
+
+        if epoch % hparams.epochs_per_checkpoint == 0:
+            checkpoint_path = os.path.join(
+                            output_directory, "checkpoint_{}".format(epoch) + "epoch")
+            save_checkpoint(model, optimizer, learning_rate, epoch,
+                                        checkpoint_path)
 
 
 if __name__ == '__main__':
