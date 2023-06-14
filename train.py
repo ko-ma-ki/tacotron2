@@ -139,14 +139,13 @@ def validate(model, criterion, valset, iteration, batch_size, n_gpus,
                 reduced_val_loss = reduce_tensor(loss.data, n_gpus).item()
             else:
                 reduced_val_loss = loss.item()
-            print("loss" + str(i) + ":" + str(reduced_val_loss))
             val_loss += reduced_val_loss
         val_loss = val_loss / (i + 1)
 
     model.train()
     if rank == 0:
         print("Validation loss {}: {:9f}  ".format(iteration, val_loss))
-        logger.log_validation(val_loss, model, y, y_pred, iteration)
+        #logger.log_validation(val_loss, model, y, y_pred, iteration)
 
 
 def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
@@ -207,7 +206,7 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
     model.train()
     is_overflow = False
     scaler = None
-    if hparams.fp16_run and hparams.backends == "cuda":
+    if hparams.fp16_run and hparams.backend == "cuda":
         scaler = torch.cuda.amp.GradScaler()
     # ================ MAIN TRAINNIG LOOP! ===================
     for epoch in range(epoch_offset, hparams.epochs):
@@ -217,14 +216,14 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
             for param_group in optimizer.param_groups:
                 param_group['lr'] = learning_rate
 
-            if hparams.fp16_run and hparams.backends == "cuda":
+            if hparams.fp16_run and hparams.backend == "cuda":
                 with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
                     model.zero_grad()
                     x, y = model.parse_batch(batch)
                     y_pred = model(x)
 
                     loss = criterion(y_pred, y)
-            elif hparams.fp16_run and hparams.backends == "cpu":
+            elif hparams.fp16_run and hparams.backend == "cpu":
                 with torch.amp.autocast(device_type="cpu", dtype=torch.bfloat16):
                     model.zero_grad()
                     x, y = model.parse_batch(batch)
@@ -241,14 +240,14 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
                 reduced_loss = reduce_tensor(loss.data, n_gpus).item()
             else:
                 reduced_loss = loss.item()
-            if hparams.fp16_run and hparams.backends == "cuda":
+            if hparams.fp16_run and hparams.backend == "cuda":
                 #with amp.scale_loss(loss, optimizer) as scaled_loss:
                 #    scaled_loss.backward()
                 scaler.scale(loss).backward()
             else:
                 loss.backward()
 
-            if hparams.fp16_run and hparams.backends == "cuda":
+            if hparams.fp16_run and hparams.backend == "cuda":
                 #grad_norm = torch.nn.utils.clip_grad_norm_(
                 #    amp.master_params(optimizer), hparams.grad_clip_thresh)
                 scaler.unscale_(optimizer)
@@ -258,7 +257,7 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
             else:
                 grad_norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), hparams.grad_clip_thresh)
-            if hparams.fp16_run and hparams.backends == "cuda":
+            if hparams.fp16_run and hparams.backend == "cuda":
                 scaler.step(optimizer)
                 scaler.update()
             else:
@@ -312,8 +311,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     hparams = create_hparams(args.hparams)
 
-    print(hparams.backends)
-    device = get_device(pref=hparams.backends)
+    print(hparams.backend)
+    device = get_device(pref=hparams.backend)
 
     torch.backends.cudnn.enabled = hparams.cudnn_enabled
     torch.backends.cudnn.benchmark = hparams.cudnn_benchmark
