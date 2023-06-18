@@ -209,7 +209,7 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
     if hparams.fp16_run and hparams.backend == "cuda":
         scaler = torch.cuda.amp.GradScaler()
     # ================ MAIN TRAINNIG LOOP! ===================
-    for epoch in range(epoch_offset, hparams.epochs):
+    for epoch in range(epoch_offset + 1, hparams.epochs + 1):
         print("Epoch: {}".format(epoch))
         for i, batch in enumerate(train_loader):
             start = time.perf_counter()
