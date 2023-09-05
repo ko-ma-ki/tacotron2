@@ -7,6 +7,7 @@ from numpy import finfo
 
 import torch
 import torch.amp
+import torch.cuda.amp
 from distributed import apply_gradient_allreduce
 import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
@@ -15,7 +16,7 @@ from torch.utils.data import DataLoader
 from model import Tacotron2
 from data_utils import TextMelLoader, TextMelCollate
 from loss_function import Tacotron2Loss
-from logger import Tacotron2Logger
+#from logger import Tacotron2Logger
 from hparams import create_hparams
 
 from utils import get_device
@@ -62,15 +63,15 @@ def prepare_dataloaders(hparams):
     return train_loader, valset, collate_fn
 
 
-def prepare_directories_and_logger(output_directory, log_directory, rank):
-    if rank == 0:
-        if not os.path.isdir(output_directory):
-            os.makedirs(output_directory)
-            os.chmod(output_directory, 0o775)
-        logger = Tacotron2Logger(os.path.join(output_directory, log_directory))
-    else:
-        logger = None
-    return logger
+#def prepare_directories_and_logger(output_directory, log_directory, rank):
+#    if rank == 0:
+#        if not os.path.isdir(output_directory):
+#            os.makedirs(output_directory)
+#            os.chmod(output_directory, 0o775)
+#        logger = Tacotron2Logger(os.path.join(output_directory, log_directory))
+#    else:
+#        logger = None
+#    return logger
 
 
 def load_model(hparams):
@@ -146,6 +147,8 @@ def validate(model, criterion, valset, iteration, batch_size, n_gpus,
     if rank == 0:
         print("Validation loss {}: {:9f}  ".format(iteration, val_loss))
         #logger.log_validation(val_loss, model, y, y_pred, iteration)
+        
+    return val_loss
 
 
 def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
@@ -167,7 +170,14 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
     torch.manual_seed(hparams.seed)
     torch.cuda.manual_seed(hparams.seed)
 
-    model = load_model(hparams)
+    model = load_model(hparams)    
+    if hparams.backends == "cuda":
+        try:
+            compiled_model = torch.compile(model)
+            model = compiled_model
+            print("compiled model will be used")
+        except:
+            pass    
     learning_rate = hparams.learning_rate
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate,
                                  weight_decay=hparams.weight_decay)
@@ -183,8 +193,9 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
 
     criterion = Tacotron2Loss()
 
-    logger = prepare_directories_and_logger(
-        output_directory, log_directory, rank)
+    logger = None
+    #logger = prepare_directories_and_logger(
+    #    output_directory, log_directory, rank)
 
     train_loader, valset, collate_fn = prepare_dataloaders(hparams)
 
@@ -205,25 +216,48 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
 
     model.train()
     is_overflow = False
+    
+    # ログファイルまわりのあれこれ
+    val_log = []
+    get2ndvalue = lambda val:val[1]
+    bestmodelid = None
+    logfileitr = os.path.join(output_directory, log_directory, "lossperitr.csv")
+    logfileepoch = os.path.join(output_directory, log_directory, "lossperepoch.csv")
+    os.makedirs(os.path.join(output_directory, log_directory), exist_ok=True)
+    print("log is saved to " + logfileitr + ", " + logfileepoch)
+    if not(os.path.exists(logfileitr)):
+        with open(logfileitr, "w",encoding='utf-8') as f:
+            print("epoch,iteration,trainloss,validationloss,gradnorm,iterationtime,epochtime", file=f, sep="\n", end="\n")
+        with open(logfileepoch, "w",encoding='utf-8') as f:
+            print("epoch,trainloss,validationloss,epochtime", file=f, sep="\n", end="\n")
+    
     scaler = None
-    if hparams.fp16_run and hparams.backend == "cuda":
+    if hparams.fp16_run and hparams.backends == "cuda":
         scaler = torch.cuda.amp.GradScaler()
+        
     # ================ MAIN TRAINNIG LOOP! ===================
     for epoch in range(epoch_offset + 1, hparams.epochs + 1):
         print("Epoch: {}".format(epoch))
+        log_cashe = []
+        stratepoch = time.perf_counter()
+        lossitr = 0
+        startitr = iteration
+        
         for i, batch in enumerate(train_loader):
             start = time.perf_counter()
             for param_group in optimizer.param_groups:
                 param_group['lr'] = learning_rate
 
-            if hparams.fp16_run and hparams.backend == "cuda":
+            # forward
+            if hparams.fp16_run and hparams.backends == "cuda":
                 with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
                     model.zero_grad()
                     x, y = model.parse_batch(batch)
                     y_pred = model(x)
 
                     loss = criterion(y_pred, y)
-            elif hparams.fp16_run and hparams.backend == "cpu":
+                    
+            elif hparams.fp16_run and hparams.backends == "cpu":
                 with torch.amp.autocast(device_type="cpu", dtype=torch.bfloat16):
                     model.zero_grad()
                     x, y = model.parse_batch(batch)
@@ -235,40 +269,46 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
                 y_pred = model(x)
 
                 loss = criterion(y_pred, y)
-                
+            
+            # backward
             if hparams.distributed_run:
                 reduced_loss = reduce_tensor(loss.data, n_gpus).item()
             else:
                 reduced_loss = loss.item()
-            if hparams.fp16_run and hparams.backend == "cuda":
+            if hparams.fp16_run and hparams.backends == "cuda":
                 #with amp.scale_loss(loss, optimizer) as scaled_loss:
                 #    scaled_loss.backward()
                 scaler.scale(loss).backward()
             else:
                 loss.backward()
 
-            if hparams.fp16_run and hparams.backend == "cuda":
+            # update parameters
+            if hparams.fp16_run and hparams.backends == "cuda":
                 #grad_norm = torch.nn.utils.clip_grad_norm_(
                 #    amp.master_params(optimizer), hparams.grad_clip_thresh)
                 scaler.unscale_(optimizer)
-                grad_norm = torch.nn.utils.torch.nn.utils.clip_grad_norm_(
+                grad_norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), hparams.grad_clip_thresh)
                 is_overflow = math.isnan(grad_norm)
             else:
                 grad_norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), hparams.grad_clip_thresh)
-            if hparams.fp16_run and hparams.backend == "cuda":
+            if hparams.fp16_run and hparams.backends == "cuda":
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 optimizer.step()
 
+            # log loss per iteration
             if not is_overflow and rank == 0:
                 duration = time.perf_counter() - start
                 print("Train loss {} {:.6f} Grad Norm {:.6f} {:.2f}s/it".format(
                     iteration, reduced_loss, grad_norm, duration))
-                logger.log_training(
-                    reduced_loss, grad_norm, learning_rate, duration, iteration)
+                #logger.log_training(
+                #    reduced_loss, grad_norm, learning_rate, duration, iteration)
+                
+                lossitr += reduced_loss
+                log_cashe.append(str(epoch) + "," + str(iteration) + "," + str(reduced_loss) + "," + "," + str(grad_norm) + "," + str(duration) + "," + "")
 
             if not is_overflow and (iteration % hparams.iters_per_checkpoint == 0):
                 validate(model, criterion, valset, iteration,
@@ -281,12 +321,67 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
                                     checkpoint_path)
 
             iteration += 1
-
-        if epoch % hparams.epochs_per_checkpoint == 0:
-            checkpoint_path = os.path.join(
+            ##---------------------1イテレーションの処理 ここまで-------------------------------
+            
+        #1入れテーションあたりのロスの平均
+        lossitr /= (iteration - startitr)
+        
+        #検証ロスを求める
+        val = [epoch, validate(model, criterion, valset, iteration,
+                         hparams.batch_size, n_gpus, collate_fn, logger,
+                         hparams.distributed_run, rank)]
+        
+        #今回のエポックのモデルを保存する際のファイルパス+ファイル名
+        checkpoint_path = os.path.join(
                             output_directory, "checkpoint_{}".format(epoch) + "epoch")
-            save_checkpoint(model, optimizer, learning_rate, epoch,
+        
+        #今までで最も検証ロスが小さかった場合、そのエポックのモデルを保存する
+        #1エポック目は必ず最小値なので保存
+        if val_log == []:
+            save_checkpoint(model, optimizer, learning_rate, iteration,
+                                        checkpoint_path + "_validation_best")
+            bestmodelid = val[0]
+        else:
+            #最もValidation lossが小さいとき
+            if val[1] < min(val_log, key=get2ndvalue)[1]:
+                save_checkpoint(model, optimizer, learning_rate, iteration,
+                                        checkpoint_path + "_validation_best")
+                try:
+                    os.remove(os.path.join(
+                                output_directory, "checkpoint_{}".format(bestmodelid)
+                                + "epoch_validation_best"))
+                finally:
+                    pass
+                bestmodelid = val[0]
+        
+        val_log.append(val)
+        
+        if epoch % hparams.epochs_per_checkpoint == 0 or epoch == hparams.epochs:
+            save_checkpoint(model, optimizer, learning_rate, iteration,
                                         checkpoint_path)
+        
+        epochtime = str(time.perf_counter()-stratepoch)
+        log_cashe.append(str(epoch) + "," + str(iteration-1) + "," + "," + str(val[1]) + "," +"," + "," + str(epochtime) + "")
+
+        with open(logfileitr, mode="a", encoding='utf-8') as f:
+            for line in log_cashe:
+                print(line, file=f, sep="\n", end="\n")
+        with open(logfileepoch, mode="a", encoding='utf-8') as f:
+            print(str(epoch) + "," + str(lossitr) + "," + str(val[1]) + "," + str(epochtime), file=f, sep="\n", end="\n")
+
+        #-----------------------1エポックの処理 ここまで--------------------------
+            
+        #1エポックごとに検証データに対するロスを求める    
+        #validate(model, criterion, valset, iteration,
+        #                 hparams.batch_size, n_gpus, collate_fn, logger,
+        #                 hparams.distributed_run, rank)
+        #print("type epoch :" + str(type(epoch)))
+        #print("type hparams.epocks_per_checkpoint :" + str(type(hparams.epochs_per_checkpoint)))
+        #if epoch % hparams.epochs_per_checkpoint == 0:
+        #    checkpoint_path = os.path.join(
+        #                    output_directory, "checkpoint_{}".format(epoch) + "epoch")
+        #    save_checkpoint(model, optimizer, learning_rate, epoch,
+        #                                checkpoint_path)
 
 
 if __name__ == '__main__':
@@ -311,8 +406,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     hparams = create_hparams(args.hparams)
 
-    print(hparams.backend)
-    device = get_device(pref=hparams.backend)
+    print(hparams.backends)
+    device = get_device(pref=hparams.backends)
 
     torch.backends.cudnn.enabled = hparams.cudnn_enabled
     torch.backends.cudnn.benchmark = hparams.cudnn_benchmark

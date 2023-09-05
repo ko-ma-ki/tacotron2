@@ -13,10 +13,6 @@ hyperparameter. Some cleaners are English-specific. You'll typically want to use
 '''
 
 import re
-try:
-  import pyopenjtalk
-except ModuleNotFoundError:
-  pass
 from unidecode import unidecode
 from .numbers import normalize_numbers
 
@@ -92,17 +88,3 @@ def english_cleaners(text):
   text = expand_abbreviations(text)
   text = collapse_whitespace(text)
   return text
-
-def japanese_cleaners(text):
-  try:
-    text = text.strip(text)
-    text = pyopenjtalk.g2p(text, kana=False).split(" ")
-    for i in range(len(text)):
-      if text[i] == "pau":
-        text[i] == ","
-      elif text[i] == 'N' or len(text[i]) >= 2:
-        text[i] = "{" + text[i] + "}"
-    text = "".join(text) + "."
-    return text
-  except ModuleNotFoundError or NameError:
-    return transliteration_cleaners(text)

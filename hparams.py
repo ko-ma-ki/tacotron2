@@ -2,9 +2,7 @@
 from text import symbols
 import ast
 
-
 class Hparams():
-
 
     def __init__(self, params=None):
         ################################
@@ -22,7 +20,7 @@ class Hparams():
         self.cudnn_enabled=True
         self.cudnn_benchmark=False
         self.ignore_layers=['embedding.weight']
-        self.backend="cuda"
+        self.backends="cuda"
 
         ################################
         # Data Parameters             #
