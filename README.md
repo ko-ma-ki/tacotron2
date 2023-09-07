@@ -18,9 +18,12 @@ Visit our [website] for audio samples using our published [Tacotron 2] and
 1. NVIDIA GPU + CUDA cuDNN
 
 ## Setup
-1. このリポジトリをクローン: `git clone https://ko-ma-ki/NVIDIA/tacotron2.git`
-2. ダウンロードしたフォルダ内に移動: `cd tacotron2`
-3. イニシャライズ(WaveGlowフォルダ内にWaveGlowがあるか確認すること): `git submodule init; git submodule update`
+1. このリポジトリをクローン \
+`git clone https://ko-ma-ki/NVIDIA/tacotron2.git`
+2. ダウンロードしたフォルダ内に移動 \
+`cd tacotron2`
+3. イニシャライズ(WaveGlowフォルダ内にWaveGlowがあるか確認すること) \
+`git submodule init; git submodule update`
 4. condaで適当な仮想環境を作る
 5. anacondaリポジトリからいろいろインストール \
 `conda install python cmake cython unidecode inflect`
