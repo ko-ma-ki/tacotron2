@@ -16,6 +16,11 @@ HPARAMS_EXTRA=""
 
 ################################## ここから下はいじっちゃダメ ############################################
 
+if [ -z $TRAINTYPE ]
+then
+    TRAINTYPE=normal
+fi
+
 OUTDIR=outdir/$DATASET/$TRAINTYPE
 LOGDIR=logdir
 
@@ -40,10 +45,6 @@ else
     CUDA_DEVICE="CUDA_VISIBLE_DEVICES="$CUDA_DEVICE
 fi
 
-if [ -z $TRAINTYPE ]
-then
-    TRAINTYPE=normal
-fi
 if [ $TRAINTYPE = "normal" ]
 then
     TRAIN_FILES=filelists/$DATASET"train.txt"

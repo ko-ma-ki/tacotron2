@@ -4,6 +4,7 @@ torchvision
 torchaudio
 librosa
 Unidecode
+infrect
 librosa
 #必須じゃない
 tensorboard

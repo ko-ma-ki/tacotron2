@@ -75,6 +75,7 @@ def prepare_dataloaders(hparams):
 
 
 def load_model(hparams):
+    device = get_device(pref=hparams.backends)
     model = Tacotron2(hparams).to(device)
     if hparams.fp16_run:
         model.decoder.attention_layer.score_mask_value = finfo('float16').min

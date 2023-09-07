@@ -7,3 +7,8 @@ text/
 waveglow/
 corpus/
 
+corpus
+corpus-desktopminishx01
+filelists/ljs_audio_text_test_filelist.txt
+filelists/ljs_audio_text_train_filelist.txt
+filelists/ljs_audio_text_val_filelist.txt
