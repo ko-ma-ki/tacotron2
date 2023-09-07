@@ -18,19 +18,24 @@ Visit our [website] for audio samples using our published [Tacotron 2] and
 1. NVIDIA GPU + CUDA cuDNN
 
 ## Setup
-1. Download and extract the [LJ Speech dataset](https://keithito.com/LJ-Speech-Dataset/)
-2. Clone this repo: `git clone https://github.com/NVIDIA/tacotron2.git`
-3. CD into this repo: `cd tacotron2`
-4. Initialize submodule: `git submodule init; git submodule update`
-5. Update .wav paths: `sed -i -- 's,DUMMY,ljs_dataset_folder/wavs,g' filelists/*.txt`
-    - Alternatively, set `load_mel_from_disk=True` in `hparams.py` and update mel-spectrogram paths 
-6. Install [PyTorch 1.0]
-7. Install [Apex]
-8. Install python requirements or build docker image 
-    - Install python requirements: `pip install -r requirements.txt`
+1. このリポジトリをクローン: `git clone https://ko-ma-ki/NVIDIA/tacotron2.git`
+2. ダウンロードしたフォルダ内に移動: `cd tacotron2`
+3. イニシャライズ(WaveGlowフォルダ内にWaveGlowがあるか確認すること): `git submodule init; git submodule update`
+4. condaで適当な仮想環境を作る
+5. anacondaリポジトリからいろいろインストール \
+`conda install python cmake cython unidecode inflect`
+7. [PyTorch]をインストールする \
+最新版が使えないなら[過去のバージョン]からできるだけ新しいものをインストール \
+1.12.0以降なら多分大丈夫
+8. Conda-ForgeリポジトリからLibrosaをインストール `conda install -c conda-forge librosa -y`
+9. PyOpenJTalkをインストール \
+`pip install git+https://github.com/r9y9/pyopenjtalk.git --no-build-isolation`
 
 ## Training
 1. `python train.py --output_directory=outdir --log_directory=logdir`
+```
+
+```
 2. (OPTIONAL) `tensorboard --logdir=outdir/logdir`
 
 ## Training using a pre-trained model
@@ -74,8 +79,9 @@ Wang and Zongheng Yang.
 
 [WaveGlow]: https://drive.google.com/open?id=1rpK8CzAAirq9sWZhe9nlfvxMF1dRgFbF
 [Tacotron 2]: https://drive.google.com/file/d/1c5ZTuT7J08wLUoVZ2KkUs_VdZuJ86ZqA/view?usp=sharing
-[pytorch 1.0]: https://github.com/pytorch/pytorch#installation
 [website]: https://nv-adlr.github.io/WaveGlow
 [ignored]: https://github.com/NVIDIA/tacotron2/blob/master/hparams.py#L22
+[PyTorch]: https://pytorch.org/get-started/locally/
+[過去のバージョン]: https://pytorch.org/get-started/previous-versions/
 [Apex]: https://github.com/nvidia/apex
 [AMP]: https://github.com/NVIDIA/apex/tree/master/apex/amp
